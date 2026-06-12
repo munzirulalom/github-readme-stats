@@ -409,4 +409,30 @@ describe("Test /api/", () => {
       "https://tiny.one/readme-stats",
     );
   });
+
+  it("should respond with 400 when both include_orgs and exclude_orgs are set", async () => {
+    const req = {
+      query: {
+        username: "anuraghazra",
+        include_orgs: "orgA,orgB",
+        exclude_orgs: "orgC",
+      },
+    };
+    const res = {
+      setHeader: jest.fn(),
+      send: jest.fn(),
+      status: jest.fn(),
+    };
+
+    await api(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.send).toHaveBeenCalledWith(
+      renderError({
+        message: "Something went wrong",
+        secondaryMessage:
+          "`include_orgs` and `exclude_orgs` cannot be used together",
+      }),
+    );
+  });
 });

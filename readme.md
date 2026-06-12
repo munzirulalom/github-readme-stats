@@ -45,6 +45,103 @@
 
 <p align="center">Love the project? Please consider <a href="https://www.paypal.me/anuraghazra">donating</a> to help it improve!</p>
 
+---
+
+# 🚀 Self-Hosted on Cloudflare Pages (private + organization stats)
+
+> This fork adds **Cloudflare Pages** deployment and **organization-contribution
+> filtering** on top of the original project. Everything below this section is
+> the upstream documentation and applies unchanged.
+
+The public instance can only read **public** data. When you self-host with your
+own GitHub token, the cards count your **private repository** and
+**organization** contributions too — the same numbers GitHub shows on your
+profile contribution graph. Because the token is yours, no third party ever sees
+your private data, and Cloudflare's free tier means zero hosting cost.
+
+## Why self-host
+
+- ✅ Private repository commits, PRs, issues, and stars are counted.
+- ✅ Organization contributions are counted (your token's `read:org` scope unlocks them).
+- ✅ Optionally filter which organizations are included with `include_orgs` / `exclude_orgs`.
+
+## 1. Create a GitHub token
+
+Two token types work. Pick one:
+
+**Classic PAT (recommended — works everywhere):**
+
+1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)**.
+2. Generate a token with these scopes: `read:user`, `repo`, `read:org`.
+3. Copy it — you'll paste it into Cloudflare in step 3.
+
+**Fine-grained PAT (advanced):** more secure (per-repo, forced expiry), but to
+count contributions in an organization you don't own, **that org's owner must
+explicitly allow fine-grained tokens** in the org settings. If you only need
+your own repos/orgs, fine-grained works well; otherwise prefer the classic PAT.
+
+## 2. Fork this repository
+
+Fork it to your own GitHub account so Cloudflare can deploy from it and
+auto-redeploy on every push.
+
+## 3. Deploy to Cloudflare Pages
+
+1. Log in to the [Cloudflare dashboard](https://dash.cloudflare.com) → **Workers & Pages** → **Create application** → **Pages** → **Connect to Git**.
+2. Select your fork. Configure the build:
+   - **Framework preset:** `None`
+   - **Build command:** _(leave empty)_
+   - **Build output directory:** `/`
+3. Add an **environment variable**:
+   - `GITHUB_TOKEN` = the token from step 1.
+4. Save and deploy. You'll get a URL like `https://<your-project>.pages.dev`.
+5. Open **Settings → Functions → Compatibility flags** and add **`nodejs_compat`**, then redeploy.
+
+> ℹ️ The token is also accepted as `PAT_1` if you prefer the upstream variable
+> name. `GITHUB_TOKEN` is mapped to `PAT_1` automatically.
+
+## 4. Use your instance
+
+Replace `<your-project>` with your Pages subdomain:
+
+```md
+<!-- Stats card -->
+![Stats](https://<your-project>.pages.dev/api?username=YOUR_NAME)
+
+<!-- Top languages -->
+![Top Langs](https://<your-project>.pages.dev/api/top-langs?username=YOUR_NAME)
+```
+
+All upstream cards and query options (themes, `show_icons`, `hide`, etc.)
+documented below work exactly the same — only the host changes.
+
+## Organization filtering (optional)
+
+By **default all organizations** are included. To narrow the **commit count** to
+specific orgs, add one of these to the stats card URL (comma-separated, optional):
+
+```md
+<!-- Only count commits to these orgs -->
+![Stats](https://<your-project>.pages.dev/api?username=YOUR_NAME&include_orgs=orgA,orgB)
+
+<!-- Count commits to all orgs except these -->
+![Stats](https://<your-project>.pages.dev/api?username=YOUR_NAME&exclude_orgs=orgC)
+```
+
+Notes:
+
+- `include_orgs` and `exclude_orgs` **cannot be used together** — doing so returns an HTTP `400` error card.
+- Org names match case-insensitively.
+- The filter adjusts the **commit** statistic (the stat most affected by org work) and applies to membership-based orgs returned by the API. It is ignored when `include_all_commits=true`, which uses GitHub's REST search for an all-time count.
+
+## Wakatime card
+
+The Wakatime card works if you add a `WAKATIME_API_KEY` environment variable in
+the Cloudflare dashboard; otherwise that one endpoint simply returns an error,
+exactly as upstream.
+
+---
+
 <details>
 <summary>Table of contents (Click to show)</summary>
 

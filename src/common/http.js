@@ -1,6 +1,6 @@
 // @ts-check
 
-import axios from "axios";
+import axios from "./axios.js";
 
 /**
  * Send GraphQL request to GitHub API.

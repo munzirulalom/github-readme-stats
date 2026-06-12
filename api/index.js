@@ -48,8 +48,30 @@ export default async (req, res) => {
     border_color,
     rank_icon,
     show,
+    include_orgs,
+    exclude_orgs,
   } = req.query;
   res.setHeader("Content-Type", "image/svg+xml");
+
+  const includeOrgs = parseArray(include_orgs);
+  const excludeOrgs = parseArray(exclude_orgs);
+  if (includeOrgs.length > 0 && excludeOrgs.length > 0) {
+    res.status(400);
+    return res.send(
+      renderError({
+        message: "Something went wrong",
+        secondaryMessage:
+          "`include_orgs` and `exclude_orgs` cannot be used together",
+        renderOptions: {
+          title_color,
+          text_color,
+          bg_color,
+          border_color,
+          theme,
+        },
+      }),
+    );
+  }
 
   const access = guardAccess({
     res,
@@ -94,6 +116,8 @@ export default async (req, res) => {
       showStats.includes("discussions_started"),
       showStats.includes("discussions_answered"),
       parseInt(commits_year, 10),
+      includeOrgs,
+      excludeOrgs,
     );
     const cacheSeconds = resolveCacheSeconds({
       requested: parseInt(cache_seconds, 10),

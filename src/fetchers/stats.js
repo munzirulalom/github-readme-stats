@@ -1,6 +1,6 @@
 // @ts-check
 
-import axios from "axios";
+import axios from "../common/axios.js";
 import * as dotenv from "dotenv";
 import githubUsernameRegex from "github-username-regex";
 import { calculateRank } from "../calculateRank.js";
@@ -10,6 +10,7 @@ import { excludeRepositories } from "../common/envs.js";
 import { CustomError, MissingParamError } from "../common/error.js";
 import { wrapTextMultiline } from "../common/fmt.js";
 import { request } from "../common/http.js";
+import { filterOrgs } from "../common/orgs.js";
 
 dotenv.config();
 
@@ -77,6 +78,139 @@ const GRAPHQL_STATS_QUERY = `
     }
   }
 `;
+
+// Query that lists the organizations a user belongs to, with the node IDs
+// needed to scope a contributionsCollection to a single organization.
+const GRAPHQL_ORGS_QUERY = `
+  query userOrgs($login: String!) {
+    user(login: $login) {
+      organizations(first: 100) {
+        nodes {
+          login
+          id
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * Build a GraphQL query that fetches the commit contributions a user made to
+ * each of the given organizations, one aliased field per org.
+ *
+ * @param {Array<{login: string, id: string}>} orgs Organizations to query.
+ * @returns {string} GraphQL query string.
+ */
+const buildOrgCommitsQuery = (orgs) => {
+  const varDecls = orgs.map((_, i) => `$id${i}: ID!`).join(", ");
+  const fields = orgs
+    .map(
+      (_, i) =>
+        `org${i}: contributionsCollection(organizationID: $id${i}, from: $startTime) { totalCommitContributions }`,
+    )
+    .join("\n      ");
+  return `
+  query orgCommits($login: String!, $startTime: DateTime, ${varDecls}) {
+    user(login: $login) {
+      ${fields}
+    }
+  }
+`;
+};
+
+/**
+ * Retryer-compatible fetcher for the user's organization list.
+ *
+ * @param {object} variables Fetcher variables.
+ * @param {string} token GitHub token.
+ * @returns {Promise<import('axios').AxiosResponse>} Axios response.
+ */
+const orgsFetcher = (variables, token) => {
+  return request(
+    { query: GRAPHQL_ORGS_QUERY, variables: { login: variables.login } },
+    { Authorization: `bearer ${token}` },
+  );
+};
+
+/**
+ * Retryer-compatible fetcher for per-organization commit contributions. The
+ * dynamic query and its variables are carried on `variables`.
+ *
+ * @param {object} variables Fetcher variables.
+ * @param {string} token GitHub token.
+ * @returns {Promise<import('axios').AxiosResponse>} Axios response.
+ */
+const orgCommitsFetcher = (variables, token) => {
+  return request(
+    { query: variables.query, variables: variables.queryVars },
+    { Authorization: `bearer ${token}` },
+  );
+};
+
+/**
+ * Adjust the total commit count to only reflect the requested organizations.
+ *
+ * `include_orgs` returns the summed commit contributions to just those orgs.
+ * `exclude_orgs` returns the all-org total minus the excluded orgs' commits.
+ * Only the commit count is affected. On any error the original total is
+ * returned unchanged so stats never break because of the optional filter.
+ *
+ * @param {object} args Arguments.
+ * @param {string} args.username GitHub username.
+ * @param {string[]} args.includeOrgs Orgs to include (whitelist).
+ * @param {string[]} args.excludeOrgs Orgs to exclude (blacklist).
+ * @param {string|undefined} args.startTime Time to start the count of commits.
+ * @param {number} args.totalCommits All-org total commit count.
+ * @returns {Promise<number>} The org-filtered commit count.
+ */
+const filterCommitsByOrg = async ({
+  username,
+  includeOrgs,
+  excludeOrgs,
+  startTime,
+  totalCommits,
+}) => {
+  const orgsRes = await retryer(orgsFetcher, { login: username });
+  if (orgsRes.data.errors || !orgsRes.data.data?.user?.organizations) {
+    return totalCommits;
+  }
+
+  const orgNodes = orgsRes.data.data.user.organizations.nodes;
+  const allLogins = orgNodes.map((node) => node.login);
+  // Throws if both lists are provided; callers guard against that earlier.
+  const keptLogins = filterOrgs(allLogins, includeOrgs, excludeOrgs);
+
+  const isInclude = Array.isArray(includeOrgs) && includeOrgs.length > 0;
+  // For include we sum the kept orgs; for exclude we sum the dropped orgs so we
+  // can subtract them from the all-org total.
+  const orgsToQuery = isInclude
+    ? orgNodes.filter((node) => keptLogins.includes(node.login))
+    : orgNodes.filter((node) => !keptLogins.includes(node.login));
+
+  if (orgsToQuery.length === 0) {
+    return isInclude ? 0 : totalCommits;
+  }
+
+  const queryVars = { login: username, startTime };
+  orgsToQuery.forEach((node, i) => {
+    queryVars[`id${i}`] = node.id;
+  });
+
+  const res = await retryer(orgCommitsFetcher, {
+    query: buildOrgCommitsQuery(orgsToQuery),
+    queryVars,
+  });
+  if (res.data.errors || !res.data.data?.user) {
+    return totalCommits;
+  }
+
+  const user = res.data.data.user;
+  const orgCommits = orgsToQuery.reduce((sum, _node, i) => {
+    return sum + (user[`org${i}`]?.totalCommitContributions || 0);
+  }, 0);
+
+  return isInclude ? orgCommits : Math.max(totalCommits - orgCommits, 0);
+};
 
 /**
  * Stats fetcher object.
@@ -222,6 +356,8 @@ const totalCommitsFetcher = async (username) => {
  * @param {boolean} include_discussions Include discussions.
  * @param {boolean} include_discussions_answers Include discussions answers.
  * @param {number|undefined} commits_year Year to count total commits
+ * @param {string[]} include_orgs Only count commits to these organizations.
+ * @param {string[]} exclude_orgs Count commits to all organizations except these.
  * @returns {Promise<import("./types").StatsData>} Stats data.
  */
 const fetchStats = async (
@@ -232,6 +368,8 @@ const fetchStats = async (
   include_discussions = false,
   include_discussions_answers = false,
   commits_year,
+  include_orgs = [],
+  exclude_orgs = [],
 ) => {
   if (!username) {
     throw new MissingParamError(["username"]);
@@ -290,6 +428,22 @@ const fetchStats = async (
     stats.totalCommits = await totalCommitsFetcher(username);
   } else {
     stats.totalCommits = user.commits.totalCommitContributions;
+  }
+
+  // Optionally scope the commit count to specific organizations. This relies on
+  // the GraphQL contributionsCollection, so it is skipped when commits come from
+  // the REST all-commits path above.
+  const orgFilterActive =
+    (Array.isArray(include_orgs) && include_orgs.length > 0) ||
+    (Array.isArray(exclude_orgs) && exclude_orgs.length > 0);
+  if (orgFilterActive && !include_all_commits) {
+    stats.totalCommits = await filterCommitsByOrg({
+      username,
+      includeOrgs: include_orgs,
+      excludeOrgs: exclude_orgs,
+      startTime: commits_year ? `${commits_year}-01-01T00:00:00Z` : undefined,
+      totalCommits: stats.totalCommits,
+    });
   }
 
   stats.totalPRs = user.pullRequests.totalCount;

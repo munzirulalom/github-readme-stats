@@ -1,6 +1,6 @@
 // @ts-check
 
-import axios from "axios";
+import axios from "../common/axios.js";
 import { CustomError, MissingParamError } from "../common/error.js";
 
 /**
