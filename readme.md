@@ -87,16 +87,25 @@ auto-redeploy on every push.
 
 ## 3. Deploy to Cloudflare Pages
 
+This repo ships a `wrangler.toml` that marks it as a Pages project, sets the
+static output directory (`public/`), and enables the **`nodejs_compat`**
+compatibility flag — so you do **not** need to toggle that flag in the dashboard.
+
 1. Log in to the [Cloudflare dashboard](https://dash.cloudflare.com) → **Workers & Pages** → **Create application** → **Pages** → **Connect to Git**.
 2. Select your fork. Configure the build:
    - **Framework preset:** `None`
    - **Build command:** _(leave empty)_
-   - **Build output directory:** `/`
-3. Add an **environment variable**:
+   - **Deploy command:** `npx wrangler pages deploy`
+3. Make sure the `name` field in `wrangler.toml` matches your Pages **project name** (rename either one so they agree).
+4. Add an **environment variable**:
    - `GITHUB_TOKEN` = the token from step 1.
-4. Save and deploy. You'll get a URL like `https://<your-project>.pages.dev`.
-5. Open **Settings → Functions → Compatibility flags** and add **`nodejs_compat`**, then redeploy.
+5. Save and deploy. You'll get a URL like `https://<your-project>.pages.dev`.
 
+> ⚠️ Use the **`npx wrangler pages deploy`** deploy command, _not_ `npx wrangler
+> deploy`. The latter is for Workers and will fail with
+> _"Could not detect a directory containing static files"_ because this project
+> uses the Pages `functions/` directory convention.
+>
 > ℹ️ The token is also accepted as `PAT_1` if you prefer the upstream variable
 > name. `GITHUB_TOKEN` is mapped to `PAT_1` automatically.
 

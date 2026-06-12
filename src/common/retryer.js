@@ -5,11 +5,25 @@ import { logger } from "./log.js";
 
 // Script variables.
 
-// Count the number of GitHub API tokens available.
-const PATs = Object.keys(process.env).filter((key) =>
-  /PAT_\d*$/.exec(key),
-).length;
-const RETRIES = process.env.NODE_ENV === "test" ? 7 : PATs;
+/**
+ * Count the number of GitHub API tokens (PAT_1, PAT_2, ...) available.
+ *
+ * This is computed on every call rather than once at module load: on serverless
+ * platforms such as Cloudflare Pages the environment is bridged onto
+ * `process.env` per request, so the token may not exist yet when this module is
+ * first imported.
+ *
+ * @returns {number} The retry budget (number of available tokens).
+ */
+const getRetryCount = () => {
+  if (process.env.NODE_ENV === "test") {
+    return 7;
+  }
+  return Object.keys(process.env).filter((key) => /PAT_\d*$/.exec(key)).length;
+};
+
+// Kept for backwards-compatible imports (e.g. tests).
+const RETRIES = getRetryCount();
 
 /**
  * @typedef {import("axios").AxiosResponse} AxiosResponse Axios response.
@@ -25,11 +39,12 @@ const RETRIES = process.env.NODE_ENV === "test" ? 7 : PATs;
  * @returns {Promise<any>} The response from the fetcher function.
  */
 const retryer = async (fetcher, variables, retries = 0) => {
-  if (!RETRIES) {
+  const maxRetries = getRetryCount();
+  if (!maxRetries) {
     throw new CustomError("No GitHub API tokens found", CustomError.NO_TOKENS);
   }
 
-  if (retries > RETRIES) {
+  if (retries > maxRetries) {
     throw new CustomError(
       "Downtime due to GitHub API rate limiting",
       CustomError.MAX_RETRY,

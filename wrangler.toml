@@ -1,0 +1,16 @@
+# Cloudflare Pages configuration.
+#
+# The presence of `pages_build_output_dir` tells Wrangler/Cloudflare this is a
+# Pages project (so the root `functions/` directory is compiled into Pages
+# Functions and served under /api/*), not a plain Worker.
+#
+# `name` must match your Cloudflare Pages project name. Rename it here or rename
+# the project in the dashboard so the two agree.
+name = "github-readme-stats"
+pages_build_output_dir = "public"
+
+# nodejs_compat is required: axios and dotenv reference Node built-ins at import
+# time even though requests run through the Web `fetch` adapter. Setting it here
+# means you do NOT need to toggle the compatibility flag in the dashboard.
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
